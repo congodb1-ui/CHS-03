@@ -28,6 +28,10 @@ import {
   ROLE_LABELS,
   EmergencyContact,
   SocietyGalleryItem,
+  MaintenanceLedgerEntry,
+  getUserRoles,
+  hasRole,
+  hasAnyRole,
 } from '../types';
 import {
   INITIAL_NOTICES,
@@ -57,6 +61,7 @@ import {
   INITIAL_POLLS,
   INITIAL_EMERGENCY_CONTACTS,
   INITIAL_GALLERY_ITEMS,
+  INITIAL_MAINTENANCE_LEDGER,
 } from '../data/initialData';
 import {
   supabase,
@@ -136,9 +141,12 @@ interface SocietyContextType {
   userName: string;
   setUserName: (name: string) => void;
   currentMemberId: string;
-  // Profiles, Single Member Per Flat & Approval Engine
+  // Profiles, Dual User Per Flat & Multi-Role Approval Engine
   profiles: MemberProfile[];
   currentProfile?: MemberProfile;
+  currentUserRoles: string[];
+  hasRole: (targetRole: string) => boolean;
+  hasAnyRole: (targetRoles: string[]) => boolean;
   registerMember: (data: {
     name: string;
     email: string;
@@ -151,8 +159,20 @@ interface SocietyContextType {
   addMemberProfile: (profile: Omit<MemberProfile, 'id' | 'memberId' | 'isApproved' | 'status' | 'registeredDate'>) => string;
   updateMemberProfile: (id: string, updates: Partial<MemberProfile>) => void;
   approveMemberProfile: (id: string, isApproved: boolean, remarks?: string) => void;
-  updateUserRole: (id: string, newRole: UserRole) => void;
+  updateUserRole: (id: string, newRole: UserRole, newRoles?: string[]) => void;
+  updateUserRoles: (id: string, newRoles: string[]) => void;
   deleteMemberProfile: (id: string) => void;
+  resetPasswordForEmail: (email: string) => Promise<{ success: boolean; message: string; error?: string }>;
+  adminResetPassword: (userId: string, newPassword?: string) => Promise<{ success: boolean; message: string; error?: string }>;
+  // Staff Operational Management
+  addStaffMember: (staff: Omit<StaffMember, 'srNo'>) => void;
+  updateStaffMember: (srNo: number, updates: Partial<StaffMember>) => void;
+  deleteStaffMember: (srNo: number) => void;
+  // Maintenance & Dues Tracker
+  maintenanceRecords: MaintenanceLedgerEntry[];
+  updateMaintenanceStatus: (id: string, status: 'Paid' | 'Unpaid' | 'Overdue', details?: Partial<MaintenanceLedgerEntry>) => void;
+  recordMaintenancePayment: (flatNo: string, cycle: string, paymentData: { amount: number; mode: 'UPI' | 'NEFT / RTGS' | 'Cheque' | 'Cash'; utrNumber: string; receiptUrl?: string; notes?: string }) => void;
+  sendMaintenanceReminder: (flatNos: string[], cycle: string, customMessage?: string) => { count: number; message: string };
   auditLogs: ApprovalAuditEntry[];
   // Vehicles & Parking
   vehicles: VehicleRecord[];
@@ -326,23 +346,32 @@ export const SocietyProvider: React.FC<{ children: React.ReactNode }> = ({ child
 
   const [role, setRoleState] = useState<UserRole>(() => {
     const saved = localStorage.getItem('solitaire_role');
-    if (saved === 'resident' || saved === 'supervisor' || saved === 'mc_member' || saved === 'admin') {
+    if (saved === 'resident' || saved === 'supervisor' || saved === 'mc_member' || saved === 'admin' || saved === 'secretary' || saved === 'tenant') {
       return saved as UserRole;
     }
     if (saved === 'member') return 'resident';
-    if (saved === 'secretary') return 'mc_member';
     return 'public';
   });
 
   const currentProfile = profiles.find((p) => p.id === activeProfileId) || profiles[0];
 
   const isAuthenticated = role !== 'public';
-  const isRejected = Boolean(currentProfile && currentProfile.status === 'Rejected' && role === 'resident');
+  const isRejected = Boolean(currentProfile && currentProfile.status === 'Rejected' && (role === 'resident' || role === 'tenant'));
   const isPendingApproval = Boolean(
     currentProfile &&
       (currentProfile.status === 'Pending Approval' || (!currentProfile.isApproved && currentProfile.status !== 'Rejected')) &&
-      role === 'resident'
+      (role === 'resident' || role === 'tenant')
   );
+
+  const currentUserRoles = getUserRoles(currentProfile, role);
+
+  const checkHasRole = useCallback((targetRole: string) => {
+    return hasRole(currentProfile, targetRole, role);
+  }, [currentProfile, role]);
+
+  const checkHasAnyRole = useCallback((targetRoles: string[]) => {
+    return hasAnyRole(currentProfile, targetRoles, role);
+  }, [currentProfile, role]);
 
   const [activeTab, setActiveTabState] = useState<string>('home');
   const [isEmergencyOpen, setIsEmergencyOpen] = useState<boolean>(false);
@@ -394,8 +423,7 @@ export const SocietyProvider: React.FC<{ children: React.ReactNode }> = ({ child
 
   // Sync user info when profile or role changes
   const loginAsRole = useCallback((newRole: UserRole, profileId?: string) => {
-    const normalizedRole: UserRole =
-      newRole === 'member' ? 'resident' : newRole === 'secretary' ? 'mc_member' : newRole;
+    const normalizedRole: UserRole = newRole === 'member' ? 'resident' : newRole;
 
     setRoleState(normalizedRole);
     localStorage.setItem('solitaire_role', normalizedRole);
@@ -411,11 +439,27 @@ export const SocietyProvider: React.FC<{ children: React.ReactNode }> = ({ child
     let targetProfile = profileId
       ? profiles.find((p) => p.id === profileId) || OFFICIAL_LOCAL_USERS.find((p) => p.id === profileId)
       : undefined;
+
     if (!targetProfile) {
-      if (normalizedRole === 'resident') targetProfile = OFFICIAL_LOCAL_USERS.find((p) => p.role === 'resident') || profiles.find((p) => p.role === 'resident' || p.role === 'member');
-      else if (normalizedRole === 'supervisor') targetProfile = OFFICIAL_LOCAL_USERS.find((p) => p.role === 'supervisor') || profiles.find((p) => p.role === 'supervisor');
-      else if (normalizedRole === 'mc_member') targetProfile = OFFICIAL_LOCAL_USERS.find((p) => p.role === 'mc_member') || profiles.find((p) => p.role === 'mc_member' || p.role === 'secretary');
-      else if (normalizedRole === 'admin') targetProfile = OFFICIAL_LOCAL_USERS.find((p) => p.role === 'admin') || profiles.find((p) => p.role === 'admin');
+      if (normalizedRole === 'secretary') {
+        targetProfile = profiles.find((p) => p.role === 'secretary' || p.roles?.includes('secretary')) ||
+          OFFICIAL_LOCAL_USERS.find((p) => p.role === 'secretary' || p.roles?.includes('secretary'));
+      } else if (normalizedRole === 'tenant') {
+        targetProfile = profiles.find((p) => p.role === 'tenant' || p.ownershipType === 'Tenant') ||
+          OFFICIAL_LOCAL_USERS.find((p) => p.role === 'tenant');
+      } else if (normalizedRole === 'resident') {
+        targetProfile = profiles.find((p) => (p.role === 'resident' || p.role === 'member') && p.ownershipType === 'Owner') ||
+          OFFICIAL_LOCAL_USERS.find((p) => p.role === 'resident');
+      } else if (normalizedRole === 'supervisor') {
+        targetProfile = OFFICIAL_LOCAL_USERS.find((p) => p.role === 'supervisor') ||
+          profiles.find((p) => p.role === 'supervisor');
+      } else if (normalizedRole === 'mc_member') {
+        targetProfile = OFFICIAL_LOCAL_USERS.find((p) => p.role === 'mc_member') ||
+          profiles.find((p) => p.role === 'mc_member' || p.roles?.includes('mc_member'));
+      } else if (normalizedRole === 'admin') {
+        targetProfile = OFFICIAL_LOCAL_USERS.find((p) => p.role === 'admin') ||
+          profiles.find((p) => p.role === 'admin');
+      }
     }
 
     if (targetProfile) {
@@ -425,17 +469,25 @@ export const SocietyProvider: React.FC<{ children: React.ReactNode }> = ({ child
       setUserName(targetProfile.name);
       setCurrentMemberId(targetProfile.memberId);
     } else {
-      if (normalizedRole === 'resident') {
+      if (normalizedRole === 'secretary') {
+        setUserFlat('B-801');
+        setUserName('Pooja Hegde-Patil (Secretary)');
+        setCurrentMemberId('SOL-B-801');
+      } else if (normalizedRole === 'tenant') {
         setUserFlat('A-402');
-        setUserName('Resident Member');
+        setUserName('Amit Varma (Tenant)');
+        setCurrentMemberId('SOL-A-402-T');
+      } else if (normalizedRole === 'resident') {
+        setUserFlat('A-402');
+        setUserName('Rajesh Sharma');
         setCurrentMemberId('SOL-A-402');
       } else if (normalizedRole === 'supervisor') {
-        setUserFlat('Estate Office');
-        setUserName('Facility Supervisor');
+        setUserFlat('A-101');
+        setUserName('Facility Supervisor (Parvez Khan)');
         setCurrentMemberId('SOL-SUP-01');
       } else if (normalizedRole === 'mc_member') {
         setUserFlat('B-801');
-        setUserName('MC Member / Secretary');
+        setUserName('MC Member');
         setCurrentMemberId('SOL-B-801');
       } else if (normalizedRole === 'admin') {
         setUserFlat('A-1202');
@@ -599,7 +651,113 @@ export const SocietyProvider: React.FC<{ children: React.ReactNode }> = ({ child
   };
 
   const [selectedInspectionDay, setSelectedInspectionDay] = useState<number>(2);
-  const [staffList] = useState<StaffMember[]>(MASTER_STAFF_DIRECTORY);
+  const [staffList, setStaffList] = useState<StaffMember[]>(() => {
+    try {
+      const saved = localStorage.getItem('solitaire_staff_list_v2');
+      if (saved) return JSON.parse(saved);
+    } catch {}
+    return MASTER_STAFF_DIRECTORY;
+  });
+
+  useEffect(() => {
+    localStorage.setItem('solitaire_staff_list_v2', JSON.stringify(staffList));
+  }, [staffList]);
+
+  const addStaffMember = useCallback((staff: Omit<StaffMember, 'srNo'>) => {
+    setStaffList((prev) => {
+      const maxSr = prev.reduce((acc, curr) => Math.max(acc, curr.srNo), 0);
+      const newStaff: StaffMember = { ...staff, srNo: maxSr + 1 };
+      return [...prev, newStaff];
+    });
+  }, []);
+
+  const updateStaffMember = useCallback((srNo: number, updates: Partial<StaffMember>) => {
+    setStaffList((prev) => prev.map((s) => (s.srNo === srNo ? { ...s, ...updates } : s)));
+  }, []);
+
+  const deleteStaffMember = useCallback((srNo: number) => {
+    setStaffList((prev) => prev.filter((s) => s.srNo !== srNo));
+  }, []);
+
+  // Maintenance & Dues state with localStorage
+  const [maintenanceRecords, setMaintenanceRecords] = useState<MaintenanceLedgerEntry[]>(() => {
+    try {
+      const saved = localStorage.getItem('solitaire_maintenance_ledger_v2');
+      if (saved) return JSON.parse(saved);
+    } catch {}
+    return INITIAL_MAINTENANCE_LEDGER;
+  });
+
+  useEffect(() => {
+    localStorage.setItem('solitaire_maintenance_ledger_v2', JSON.stringify(maintenanceRecords));
+  }, [maintenanceRecords]);
+
+  const updateMaintenanceStatus = useCallback((id: string, status: 'Paid' | 'Unpaid' | 'Overdue', details?: Partial<MaintenanceLedgerEntry>) => {
+    setMaintenanceRecords((prev) =>
+      prev.map((rec) => (rec.id === id ? { ...rec, paymentStatus: status, ...details } : rec))
+    );
+  }, []);
+
+  const recordMaintenancePayment = useCallback((
+    flatNo: string,
+    cycle: string,
+    paymentData: { amount: number; mode: 'UPI' | 'NEFT / RTGS' | 'Cheque' | 'Cash'; utrNumber: string; receiptUrl?: string; notes?: string }
+  ) => {
+    const today = new Date().toISOString().split('T')[0];
+    const recId = `REC-${Date.now().toString().slice(-6)}`;
+    setMaintenanceRecords((prev) => {
+      const existing = prev.find((r) => r.flatNo.toUpperCase() === flatNo.toUpperCase() && r.billingCycle === cycle);
+      if (existing) {
+        return prev.map((r) =>
+          r.id === existing.id
+            ? {
+                ...r,
+                paymentStatus: 'Paid' as const,
+                amountPaid: (r.amountPaid || 0) + paymentData.amount,
+                paidDate: today,
+                paymentMode: paymentData.mode,
+                utrNumber: paymentData.utrNumber,
+                receiptNumber: recId,
+                receiptUrl: paymentData.receiptUrl,
+                notes: paymentData.notes ? `${r.notes ? r.notes + ' | ' : ''}${paymentData.notes}` : r.notes,
+              }
+            : r
+        );
+      }
+      return prev;
+    });
+
+    const auditEntry: ApprovalAuditEntry = {
+      id: `AUD-${Date.now()}`,
+      userId: activeProfileId,
+      userName: userName,
+      flatNo: flatNo,
+      action: 'Profile Modified',
+      performedBy: userName,
+      performedByRole: role,
+      timestamp: `${today} ${new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}`,
+      details: `Maintenance payment of ₹${paymentData.amount.toLocaleString('en-IN')} recorded for ${flatNo} (${cycle}) via ${paymentData.mode} [UTR: ${paymentData.utrNumber}].`,
+    };
+    setAuditLogs((prev) => [auditEntry, ...prev]);
+  }, [activeProfileId, userName, role]);
+
+  const sendMaintenanceReminder = useCallback((flatNos: string[], cycle: string, customMessage?: string) => {
+    const count = flatNos.length;
+    const today = new Date().toISOString().split('T')[0];
+    const auditEntry: ApprovalAuditEntry = {
+      id: `AUD-${Date.now()}`,
+      userId: activeProfileId,
+      userName: userName,
+      flatNo: 'Common Estate',
+      action: 'Profile Modified',
+      performedBy: userName,
+      performedByRole: role,
+      timestamp: `${today} ${new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}`,
+      details: `Payment reminder issued to ${count} flat(s) for cycle ${cycle}: ${customMessage || 'Standard dues reminder dispatch.'}`,
+    };
+    setAuditLogs((prev) => [auditEntry, ...prev]);
+    return { count, message: `Dispatched payment reminders to ${count} resident(s) for ${cycle}.` };
+  }, [activeProfileId, userName, role]);
 
   const [inspections, setInspections] = useState<DailyInspectionReport[]>(() => {
     const saved = localStorage.getItem('solitaire_inspections');
@@ -1064,54 +1222,102 @@ export const SocietyProvider: React.FC<{ children: React.ReactNode }> = ({ child
     ownershipType: 'Owner' | 'Tenant';
   }): Promise<{ success: boolean; error?: string; memberId?: string }> => {
     const cleanFlat = data.flatNo.trim().toUpperCase();
+    const cleanEmail = (data.email || '').trim().toLowerCase();
 
-    // 1. Check Supabase 'members' and 'flats' table for one-member-per-flat constraint
+    // Module 2: Validate Personal Email
+    const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+    if (!cleanEmail || !emailRegex.test(cleanEmail)) {
+      return {
+        success: false,
+        error: 'Please provide a valid personal email address (e.g. resident@gmail.com).',
+      };
+    }
+
+    // Module 1: Enforce Dual-User Flat Limit (1 Owner + 1 Tenant max per flat)
+    const existingForFlat = profiles.filter(
+      (p) => p.flatNo.trim().toUpperCase() === cleanFlat && p.status !== 'Rejected'
+    );
+
+    const existingOwner = existingForFlat.find((p) => p.ownershipType === 'Owner');
+    const existingTenant = existingForFlat.find((p) => p.ownershipType === 'Tenant');
+
+    if (existingForFlat.length >= 2) {
+      return {
+        success: false,
+        error: `Flat [${cleanFlat}] has already reached the maximum limit of 2 registered profiles (1 Owner: ${existingOwner?.name || 'Registered'} + 1 Tenant: ${existingTenant?.name || 'Registered'}).`,
+      };
+    }
+
+    if (data.ownershipType === 'Owner' && existingOwner) {
+      return {
+        success: false,
+        error: `Flat [${cleanFlat}] already has a registered Owner profile (${existingOwner.name}). Each flat is limited to 1 Owner profile.`,
+      };
+    }
+
+    if (data.ownershipType === 'Tenant' && existingTenant) {
+      return {
+        success: false,
+        error: `Flat [${cleanFlat}] already has a registered Tenant profile (${existingTenant.name}). Each flat is limited to 1 Tenant profile.`,
+      };
+    }
+
+    // Check Supabase if live
     if (isSupabaseConfigured) {
       try {
         const { data: dbMembers, error: dbError } = await supabase
           .from('members')
-          .select('id, name, flat_no, status')
+          .select('id, name, flat_no, ownership_type, status')
           .ilike('flat_no', cleanFlat)
           .neq('status', 'Rejected');
 
         if (!dbError && dbMembers && dbMembers.length > 0) {
-          return {
-            success: false,
-            error: `Flat [${cleanFlat}] is already registered in Solitaire CHS under (${dbMembers[0].name}). Single member per flat policy is active.`,
-          };
+          const dbOwner = dbMembers.find((m: any) => m.ownership_type === 'Owner');
+          const dbTenant = dbMembers.find((m: any) => m.ownership_type === 'Tenant');
+
+          if (dbMembers.length >= 2) {
+            return {
+              success: false,
+              error: `Flat [${cleanFlat}] has already reached the maximum limit of 2 registered profiles in Solitaire CHS.`,
+            };
+          }
+          if (data.ownershipType === 'Owner' && dbOwner) {
+            return {
+              success: false,
+              error: `Flat [${cleanFlat}] already has a registered Owner (${dbOwner.name}).`,
+            };
+          }
+          if (data.ownershipType === 'Tenant' && dbTenant) {
+            return {
+              success: false,
+              error: `Flat [${cleanFlat}] already has a registered Tenant (${dbTenant.name}).`,
+            };
+          }
         }
       } catch (err) {
         console.warn('[Supabase] Failed checking member constraint in DB, checking local state:', err);
       }
     }
 
-    // 2. Fallback / Synchronous check against local memory/storage profiles
-    const alreadyRegistered = profiles.find(
-      (p) => p.flatNo.trim().toUpperCase() === cleanFlat && p.status !== 'Rejected'
-    );
-    if (alreadyRegistered) {
-      return {
-        success: false,
-        error: `Flat [${cleanFlat}] is already registered in Solitaire CHS under (${alreadyRegistered.name}). One-member-per-flat rule prevents multiple registrations.`,
-      };
-    }
-
     const today = new Date().toISOString().split('T')[0];
     const towerInitial = data.tower.replace('Tower ', '');
     const cleanNum = cleanFlat.replace(/[^a-zA-Z0-9]/g, '');
-    const genMemberId = `SOL-${towerInitial}-${cleanNum}`;
+    const genMemberId = `SOL-${towerInitial}-${cleanNum}${data.ownershipType === 'Tenant' ? '-T' : ''}`;
     const newId = `usr-${Date.now()}`;
+
+    const assignedRole: UserRole = data.ownershipType === 'Tenant' ? 'tenant' : 'resident';
 
     const newProfile: MemberProfile = {
       id: newId,
       memberId: genMemberId,
       name: data.name,
-      email: data.email,
+      email: cleanEmail,
       phone: data.phone,
       avatarUrl: data.avatarUrl || '',
       tower: data.tower,
       flatNo: cleanFlat,
-      role: 'resident',
+      role: assignedRole,
+      roles: [assignedRole],
       ownershipType: data.ownershipType,
       isApproved: false, // Default to FALSE - requires MC/Admin approval!
       status: 'Pending Approval',
@@ -1139,7 +1345,7 @@ export const SocietyProvider: React.FC<{ children: React.ReactNode }> = ({ child
       performedBy: 'Self Registration',
       performedByRole: 'public',
       timestamp: `${today} ${new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}`,
-      details: `New registration submitted for Flat [${cleanFlat}] as ${data.ownershipType}. Awaiting MC Member / Admin verification.`,
+      details: `New registration submitted for Flat [${cleanFlat}] as ${data.ownershipType} (${assignedRole}). Awaiting MC Member / Admin verification.`,
     };
     setAuditLogs((prev) => [auditEntry, ...prev]);
 
@@ -1462,6 +1668,106 @@ export const SocietyProvider: React.FC<{ children: React.ReactNode }> = ({ child
       details: `Role updated from ${ROLE_LABELS[target.role] || target.role} to ${ROLE_LABELS[newRole] || newRole}.`,
     };
     setAuditLogs((prev) => [auditEntry, ...prev]);
+  };
+
+  const updateUserRoles = (id: string, newRoles: string[]) => {
+    const target = profiles.find((p) => p.id === id);
+    if (!target) return;
+
+    const primaryRole = (newRoles[0] as UserRole) || 'resident';
+    const today = new Date().toISOString().split('T')[0];
+    const timeStr = `${today} ${new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}`;
+
+    setProfiles((prev) =>
+      prev.map((p) => (p.id === id ? { ...p, roles: newRoles, role: primaryRole } : p))
+    );
+
+    if (isSupabaseConfigured) {
+      supabase
+        .from('members')
+        .update({ role: primaryRole, roles: newRoles })
+        .eq('id', id)
+        .then(({ error }) => {
+          if (error) console.warn('[Supabase] Update user roles error:', error);
+        });
+    }
+
+    const auditEntry: ApprovalAuditEntry = {
+      id: `AUD-${Date.now()}`,
+      userId: id,
+      userName: target.name,
+      flatNo: target.flatNo,
+      action: 'Role Changed',
+      performedBy: userName,
+      performedByRole: role,
+      timestamp: timeStr,
+      details: `Multi-role assignment updated for ${target.name}: [${newRoles.join(', ')}]`,
+    };
+    setAuditLogs((prev) => [auditEntry, ...prev]);
+  };
+
+  const resetPasswordForEmail = async (email: string): Promise<{ success: boolean; message: string; error?: string }> => {
+    const targetEmail = (email || '').trim().toLowerCase();
+    if (!targetEmail) return { success: false, message: 'Please enter a valid email address.' };
+
+    if (isSupabaseConfigured) {
+      try {
+        const { error } = await supabase.auth.resetPasswordForEmail(targetEmail, {
+          redirectTo: window.location.origin,
+        });
+        if (error) {
+          return { success: false, message: error.message, error: error.message };
+        }
+        return { success: true, message: `Password reset instructions sent to ${targetEmail}. Please check your inbox.` };
+      } catch (err: any) {
+        return { success: false, message: err.message || 'Failed to trigger reset email.', error: err.message };
+      }
+    }
+
+    // Offline / Local verification
+    const exists = profiles.some((p) => (p.email || '').toLowerCase().trim() === targetEmail) ||
+      OFFICIAL_LOCAL_USERS.some((p) => p.email.toLowerCase().trim() === targetEmail);
+    if (!exists) {
+      return { success: false, message: `No registered resident account found with email: ${targetEmail}` };
+    }
+    return {
+      success: true,
+      message: `Password reset instructions dispatched to ${targetEmail}. Default temporary recovery key: Solitaire@2026.`,
+    };
+  };
+
+  const adminResetPassword = async (userId: string, newPassword?: string): Promise<{ success: boolean; message: string; error?: string }> => {
+    const target = profiles.find((p) => p.id === userId) || OFFICIAL_LOCAL_USERS.find((p) => p.id === userId);
+    if (!target) return { success: false, message: 'User profile not found.' };
+
+    const pwd = newPassword || 'Solitaire@2026';
+    const today = new Date().toISOString().split('T')[0];
+    const timeStr = `${today} ${new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}`;
+
+    setProfiles((prev) =>
+      prev.map((p) => (p.id === userId ? { ...p, tempPassword: pwd } : p))
+    );
+
+    const auditEntry: ApprovalAuditEntry = {
+      id: `AUD-${Date.now()}`,
+      userId: target.id,
+      userName: target.name,
+      flatNo: target.flatNo,
+      action: 'Profile Modified',
+      performedBy: userName,
+      performedByRole: role,
+      timestamp: timeStr,
+      details: `Admin/Secretary reset credentials for ${target.name} (${target.flatNo}). Temporary password assigned.`,
+    };
+    setAuditLogs((prev) => [auditEntry, ...prev]);
+
+    if (isSupabaseConfigured && target.email) {
+      try {
+        await supabase.auth.resetPasswordForEmail(target.email);
+      } catch {}
+    }
+
+    return { success: true, message: `Password reset successfully for ${target.name}. Temporary password set to: ${pwd}` };
   };
 
   const deleteMemberProfile = (id: string) => {
@@ -1845,9 +2151,30 @@ export const SocietyProvider: React.FC<{ children: React.ReactNode }> = ({ child
       prev.map((wo) => (wo.id === id ? { ...wo, ...updates } : wo))
     );
     if (isSupabaseConfigured) {
+      const dbPayload: Record<string, any> = {};
+      if (updates.procurementTitle !== undefined) dbPayload.procurement_title = updates.procurementTitle;
+      if (updates.category !== undefined) dbPayload.category = updates.category;
+      if (updates.totalApprovedAmount !== undefined) dbPayload.total_approved_amount = updates.totalApprovedAmount;
+      if (updates.startDate !== undefined) dbPayload.start_date = updates.startDate;
+      if (updates.targetCompletionDate !== undefined) dbPayload.target_completion_date = updates.targetCompletionDate;
+      if (updates.progressPercent !== undefined) dbPayload.progress_percent = updates.progressPercent;
+      if (updates.scopeSummary !== undefined) dbPayload.scope_summary = updates.scopeSummary;
+      if (updates.paymentTerms !== undefined) dbPayload.payment_terms = updates.paymentTerms;
+      if (updates.approvalStatus !== undefined) dbPayload.approval_status = updates.approvalStatus;
+      if (updates.workStatus !== undefined) dbPayload.work_status = updates.workStatus;
+      if (updates.termsAndConditions !== undefined) dbPayload.terms_and_conditions = updates.termsAndConditions;
+      if (updates.vendorName !== undefined) dbPayload.vendor_name = updates.vendorName;
+      if (updates.vendorContact !== undefined) dbPayload.vendor_contact = updates.vendorContact;
+      if (updates.vendorGst !== undefined) dbPayload.vendor_gst = updates.vendorGst;
+      if (updates.warrantyMonths !== undefined) dbPayload.warranty_months = updates.warrantyMonths;
+      if (updates.subtotal !== undefined) dbPayload.subtotal = updates.subtotal;
+      if (updates.taxAmount !== undefined) dbPayload.tax_amount = updates.taxAmount;
+      if (updates.secretaryComments !== undefined) dbPayload.secretary_comments = updates.secretaryComments;
+      if (updates.payments !== undefined) dbPayload.payments = updates.payments;
+
       supabase
         .from('work_orders')
-        .update(updates)
+        .update(Object.keys(dbPayload).length > 0 ? dbPayload : updates)
         .eq('id', id)
         .then(({ error }) => {
           if (error) console.warn('[Supabase] Update work order error:', error);
@@ -2402,12 +2729,25 @@ export const SocietyProvider: React.FC<{ children: React.ReactNode }> = ({ child
         currentMemberId,
         profiles,
         currentProfile,
+        currentUserRoles,
+        hasRole: checkHasRole,
+        hasAnyRole: checkHasAnyRole,
         registerMember,
         addMemberProfile,
         updateMemberProfile,
         approveMemberProfile,
         updateUserRole,
+        updateUserRoles,
         deleteMemberProfile,
+        resetPasswordForEmail,
+        adminResetPassword,
+        addStaffMember,
+        updateStaffMember,
+        deleteStaffMember,
+        maintenanceRecords,
+        updateMaintenanceStatus,
+        recordMaintenancePayment,
+        sendMaintenanceReminder,
         auditLogs,
         vehicles,
         visitorPasses,

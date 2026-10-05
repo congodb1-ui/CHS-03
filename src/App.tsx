@@ -21,6 +21,7 @@ import { DirectoryView } from './components/views/DirectoryView';
 import { ProcurementView } from './components/views/ProcurementView';
 import { ResidentRegistryView } from './components/views/ResidentRegistryView';
 import { SocietyGalleryView } from './components/views/SocietyGalleryView';
+import { MaintenanceView } from './components/views/MaintenanceView';
 import { Footer } from './components/Footer';
 import { EmergencyModal } from './components/EmergencyModal';
 import { BookingModal } from './components/BookingModal';
@@ -71,6 +72,7 @@ const AppContent: React.FC = () => {
             {(activeTab === 'vehicles' || activeTab === 'parking') && <ParkingView />}
             {activeTab === 'gallery' && <SocietyGalleryView />}
             {(activeTab === 'procurement') && <ProcurementView />}
+            {(activeTab === 'maintenance' || activeTab === 'dues') && <MaintenanceView />}
             {/* Contextual & direct dashboard links */}
             {activeTab === 'amenities' && <AmenitiesView />}
             {activeTab === 'tenants' && <TenantsView />}

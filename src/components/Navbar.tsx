@@ -22,6 +22,7 @@ import {
   User,
   Camera,
   ClipboardCheck,
+  Receipt,
 } from 'lucide-react';
 import { ProfileEditModal } from './ProfileEditModal';
 
@@ -56,6 +57,7 @@ export const Navbar: React.FC = () => {
   // Core Navigation Tabs with Role Enforcement
   const productionNavTabs = [
     { id: 'home', label: 'Dashboard', icon: LayoutDashboard, publicAllowed: true, adminOnly: false },
+    { id: 'maintenance', label: 'Maintenance & Dues', icon: Receipt, publicAllowed: false, adminOnly: false, hideForSupervisor: true },
     { id: 'inspection', label: 'Supervisor Operations', icon: ClipboardCheck, publicAllowed: false, adminOnly: false },
     { id: 'helpdesk', label: 'Helpline & Tickets', icon: LifeBuoy, publicAllowed: false, adminOnly: false },
     { id: 'registry', label: 'Resident & Flat Registry', icon: Users, publicAllowed: false, adminOnly: false },
@@ -66,7 +68,13 @@ export const Navbar: React.FC = () => {
 
   // Restrict internal society pages for unauthenticated visitors or pending resident accounts, and restrict procurement to Admin/MC
   const visibleTabs = productionNavTabs.filter((tab) => {
+    if (tab.hideForSupervisor && role === 'supervisor') {
+      return false;
+    }
     if (tab.adminOnly && !isAdminOrMC) {
+      return false;
+    }
+    if (role === 'tenant' && (tab.id === 'procurement' || tab.id === 'inspection')) {
       return false;
     }
     if (!isAuthenticated || isPendingApproval || isRejected) {
@@ -103,10 +111,14 @@ export const Navbar: React.FC = () => {
       case 'member':
         if (isRejected) return 'Registration Rejected';
         return isPendingApproval ? 'Pending Approval' : `Resident (${userFlat})`;
+      case 'tenant':
+        if (isRejected) return 'Registration Rejected';
+        return isPendingApproval ? 'Pending Approval' : `Tenant (${userFlat})`;
       case 'supervisor':
         return 'Facility Supervisor';
-      case 'mc_member':
       case 'secretary':
+        return 'MC Secretary';
+      case 'mc_member':
         return 'MC Member';
       case 'admin':
         return 'Society Admin';
@@ -123,6 +135,7 @@ export const Navbar: React.FC = () => {
     if (tabId === 'registry' && (activeTab === 'committee' || activeTab === 'directory')) return true;
     if (tabId === 'vehicles' && activeTab === 'parking') return true;
     if (tabId === 'procurement' && activeTab === 'vendors') return true;
+    if (tabId === 'maintenance' && activeTab === 'dues') return true;
     return false;
   };
 

@@ -25,6 +25,12 @@ import {
   SocietyProfileDetails,
   EmergencyContact,
   SocietyGalleryItem,
+  MaintenanceLedgerEntry,
+  TowerId,
+  ALL_SOCIETY_FLATS,
+  TOWER_A_FLATS,
+  TOWER_B_FLATS,
+  TOWER_C_FLATS,
 } from '../types';
 import heroImg from '../assets/images/hero_solitaire_society_1790929946633.jpg';
 import poolImg from '../assets/images/amenity_swimming_pool_1790929965312.jpg';
@@ -885,7 +891,7 @@ export const DEFAULT_SOCIETY_PROFILE: SocietyProfileDetails = {
 };
 
 export interface LocalCredential {
-  role: 'admin' | 'supervisor' | 'mc_member' | 'resident';
+  role: 'admin' | 'supervisor' | 'mc_member' | 'resident' | 'secretary' | 'tenant';
   roleBadge: string;
   name: string;
   designation: string;
@@ -911,19 +917,7 @@ export const LOCAL_LOGIN_CREDENTIALS: LocalCredential[] = [
     description: 'Full administrative authority to modify society master profile, address, rules, flats, residents, and vendor records.',
   },
   {
-    role: 'supervisor',
-    roleBadge: 'Facility Supervisor',
-    name: 'Facility Supervisor (Operations)',
-    designation: 'Facility Supervisor',
-    email: 'supervisor@solitaire-chs.org',
-    flatNo: 'A-101',
-    tower: 'Tower A',
-    password: 'Solitaire@2026',
-    acceptedPasswords: ['Solitaire@2026', 'supervisor123', 'supervisor@2026', 'supervisor'],
-    description: 'Operational supervisor authority: daily inspections, utility meters, security attendance, and field tickets.',
-  },
-  {
-    role: 'mc_member',
+    role: 'secretary',
     roleBadge: 'MC Secretary',
     name: 'Pooja Hegde-Patil',
     designation: 'Managing Committee Secretary',
@@ -935,8 +929,20 @@ export const LOCAL_LOGIN_CREDENTIALS: LocalCredential[] = [
     description: 'Managing Committee Secretary: approval workflows, vendor assignments, governance meetings, and notices.',
   },
   {
+    role: 'supervisor',
+    roleBadge: 'Facility Supervisor',
+    name: 'Parvez Khan',
+    designation: 'Facility Supervisor',
+    email: 'supervisor@solitaire-chs.org',
+    flatNo: 'A-101',
+    tower: 'Tower A',
+    password: 'Solitaire@2026',
+    acceptedPasswords: ['Solitaire@2026', 'supervisor123', 'supervisor@2026', 'supervisor'],
+    description: 'Operational supervisor authority: daily inspections, utility meters, security attendance, and field tickets.',
+  },
+  {
     role: 'resident',
-    roleBadge: 'Resident Member',
+    roleBadge: 'Resident (Owner)',
     name: 'Rajesh Sharma',
     designation: 'Resident Member (Owner)',
     email: 'rajesh.sharma@solitaire-chs.org',
@@ -944,7 +950,19 @@ export const LOCAL_LOGIN_CREDENTIALS: LocalCredential[] = [
     tower: 'Tower A',
     password: 'Solitaire@2026',
     acceptedPasswords: ['Solitaire@2026', 'resident123', 'resident'],
-    description: 'Resident access: service tickets, amenity reservations, vehicle permits, and community voting.',
+    description: 'Owner resident access: service tickets, amenity reservations, vehicle permits, and flat maintenance ledger.',
+  },
+  {
+    role: 'tenant',
+    roleBadge: 'Resident (Tenant)',
+    name: 'Amit Varma',
+    designation: 'Registered Tenant (Flat A-402)',
+    email: 'tenant.amit@gmail.com',
+    flatNo: 'A-402',
+    tower: 'Tower A',
+    password: 'Solitaire@2026',
+    acceptedPasswords: ['Solitaire@2026', 'tenant123', 'tenant'],
+    description: 'Tenant resident access: read-only access to notices, gate helpdesk, amenities, and flat maintenance dues.',
   },
 ];
 
@@ -957,6 +975,7 @@ export const OFFICIAL_LOCAL_USERS: MemberProfile[] = [
     tower: 'Tower A',
     flatNo: 'A-1202',
     role: 'admin',
+    roles: ['admin', 'mc_member'],
     ownershipType: 'Owner',
     phone: '+91 98901 33412',
     isApproved: true,
@@ -970,7 +989,8 @@ export const OFFICIAL_LOCAL_USERS: MemberProfile[] = [
     email: 'secretary@solitaire-chs.org',
     tower: 'Tower B',
     flatNo: 'B-801',
-    role: 'mc_member',
+    role: 'secretary',
+    roles: ['resident', 'mc_member', 'secretary'],
     ownershipType: 'Owner',
     phone: '+91 98900 12890',
     isApproved: true,
@@ -980,11 +1000,12 @@ export const OFFICIAL_LOCAL_USERS: MemberProfile[] = [
   {
     id: 'usr-004',
     memberId: 'SOL-SUP-01',
-    name: 'Facility Supervisor (Operations)',
+    name: 'Facility Supervisor (Parvez Khan)',
     email: 'supervisor@solitaire-chs.org',
     tower: 'Tower A',
     flatNo: 'A-101',
     role: 'supervisor',
+    roles: ['supervisor'],
     ownershipType: 'Owner',
     phone: '+91 98220 54101',
     isApproved: true,
@@ -999,11 +1020,27 @@ export const OFFICIAL_LOCAL_USERS: MemberProfile[] = [
     tower: 'Tower A',
     flatNo: 'A-402',
     role: 'resident',
+    roles: ['resident'],
     ownershipType: 'Owner',
     phone: '+91 98201 44521',
     isApproved: true,
     status: 'Approved',
     registeredDate: '2024-02-15',
+  },
+  {
+    id: 'usr-008',
+    memberId: 'SOL-A-402-T',
+    name: 'Amit Varma',
+    email: 'tenant.amit@gmail.com',
+    tower: 'Tower A',
+    flatNo: 'A-402',
+    role: 'tenant',
+    roles: ['tenant'],
+    ownershipType: 'Tenant',
+    phone: '+91 98231 99012',
+    isApproved: true,
+    status: 'Approved',
+    registeredDate: '2024-05-01',
   },
 ];
 
@@ -1927,8 +1964,149 @@ export const INITIAL_GALLERY_ITEMS: SocietyGalleryItem[] = [
     category: 'Campus Layout',
     visibility: 'Private',
     uploadedBy: 'MC Secretary',
-    createdAt: '2026-10-01',
+    createdAt: '2026-09-30',
   },
 ];
+
+// Initial Maintenance Ledger across all 200 units for October 2026, September 2026, and August 2026
+const OVERDUE_FLATS = new Set(['A-104', 'A-308', 'B-205', 'B-503', 'C-106', 'C-302', 'C-508']);
+const UNPAID_FLATS = new Set(['A-108', 'A-202', 'A-505', 'A-604', 'B-103', 'B-307', 'B-601', 'B-610', 'C-204', 'C-409', 'C-602']);
+
+export const INITIAL_MAINTENANCE_LEDGER: MaintenanceLedgerEntry[] = (() => {
+  const ledger: MaintenanceLedgerEntry[] = [];
+
+  const residentNameMap: Record<string, { name: string; ownership: 'Owner' | 'Tenant' }> = {
+    'A-402': { name: 'Rajesh Sharma & Amit Varma', ownership: 'Owner' },
+    'A-101': { name: 'Facility Supervisor (Parvez Khan)', ownership: 'Owner' },
+    'A-301': { name: 'Dr. Shalini Bannerjee', ownership: 'Owner' },
+    'A-1101': { name: 'Kunal Verma', ownership: 'Tenant' },
+    'A-1202': { name: 'Sanjeev Mathur (Admin)', ownership: 'Owner' },
+    'B-201': { name: 'Vikram Joshi', ownership: 'Owner' },
+    'B-801': { name: 'Pooja Hegde-Patil (Secretary)', ownership: 'Owner' },
+    'B-704': { name: 'Anita Deshmukh', ownership: 'Owner' },
+    'C-101': { name: 'Rohan Mehra', ownership: 'Owner' },
+    'C-305': { name: 'Deepa Kulkarni', ownership: 'Owner' },
+  };
+
+  ALL_SOCIETY_FLATS.forEach((flatNo, idx) => {
+    const tower: TowerId = flatNo.startsWith('A-') ? 'Tower A' : flatNo.startsWith('B-') ? 'Tower B' : 'Tower C';
+    const numPart = parseInt(flatNo.slice(2), 10);
+    const floor = Math.floor(numPart / 100);
+    const isLargerUnit = (numPart % 100) > 8;
+    const amountDue = isLargerUnit ? 5500 : 4250;
+    const residentInfo = residentNameMap[flatNo] || {
+      name: `Resident (${flatNo})`,
+      ownership: (idx % 5 === 0) ? 'Tenant' : 'Owner',
+    };
+
+    // October 2026 Cycle
+    const isOverdue = OVERDUE_FLATS.has(flatNo);
+    const isUnpaid = UNPAID_FLATS.has(flatNo);
+    let octStatus: 'Paid' | 'Unpaid' | 'Overdue' = 'Paid';
+    let octPaid = amountDue;
+    let octUtr: string | undefined = `UPI/2026100${(idx % 5) + 1}/HDFC/${9841000 + idx}`;
+    let octPaidDate: string | undefined = `2026-10-0${(idx % 5) + 1}`;
+    let octLateFee = 0;
+
+    if (isOverdue) {
+      octStatus = 'Overdue';
+      octPaid = 0;
+      octUtr = undefined;
+      octPaidDate = undefined;
+      octLateFee = 350;
+    } else if (isUnpaid) {
+      octStatus = 'Unpaid';
+      octPaid = 0;
+      octUtr = undefined;
+      octPaidDate = undefined;
+    }
+
+    ledger.push({
+      id: `MNT-2026-10-${flatNo}`,
+      month: 'October 2026',
+      billingCycle: '2026-10',
+      flatNo,
+      tower,
+      floor,
+      residentName: residentInfo.name,
+      ownershipType: residentInfo.ownership,
+      amountDue,
+      amountPaid: octPaid,
+      status: octStatus,
+      dueDate: '2026-10-15',
+      paidDate: octPaidDate,
+      paymentMode: octPaid > 0 ? (idx % 3 === 0 ? 'NEFT / RTGS' : idx % 3 === 1 ? 'UPI' : 'Cheque') : undefined,
+      utrNumber: octUtr,
+      receiptNumber: octPaid > 0 ? `SOL-REC-2610-${flatNo.replace('-', '')}` : undefined,
+      receiptUrl: octPaid > 0 ? `/receipts/2026-10-${flatNo}.pdf` : undefined,
+      lateFee: octLateFee,
+      breakdown: {
+        maintenance: Math.round(amountDue * 0.65),
+        sinkingFund: Math.round(amountDue * 0.15),
+        waterCharges: Math.round(amountDue * 0.12),
+        gstAmount: Math.round(amountDue * 0.08),
+      },
+    });
+
+    // September 2026 Cycle (Historical)
+    const sepPaid = !isOverdue;
+    ledger.push({
+      id: `MNT-2026-09-${flatNo}`,
+      month: 'September 2026',
+      billingCycle: '2026-09',
+      flatNo,
+      tower,
+      floor,
+      residentName: residentInfo.name,
+      ownershipType: residentInfo.ownership,
+      amountDue,
+      amountPaid: sepPaid ? amountDue : 0,
+      status: sepPaid ? 'Paid' : 'Overdue',
+      dueDate: '2026-09-15',
+      paidDate: sepPaid ? `2026-09-0${(idx % 6) + 2}` : undefined,
+      paymentMode: sepPaid ? 'UPI' : undefined,
+      utrNumber: sepPaid ? `UPI/20260905/HDFC/${8741000 + idx}` : undefined,
+      receiptNumber: sepPaid ? `SOL-REC-2609-${flatNo.replace('-', '')}` : undefined,
+      receiptUrl: sepPaid ? `/receipts/2026-09-${flatNo}.pdf` : undefined,
+      lateFee: sepPaid ? 0 : 350,
+      breakdown: {
+        maintenance: Math.round(amountDue * 0.65),
+        sinkingFund: Math.round(amountDue * 0.15),
+        waterCharges: Math.round(amountDue * 0.12),
+        gstAmount: Math.round(amountDue * 0.08),
+      },
+    });
+
+    // August 2026 Cycle (Historical)
+    ledger.push({
+      id: `MNT-2026-08-${flatNo}`,
+      month: 'August 2026',
+      billingCycle: '2026-08',
+      flatNo,
+      tower,
+      floor,
+      residentName: residentInfo.name,
+      ownershipType: residentInfo.ownership,
+      amountDue,
+      amountPaid: amountDue,
+      status: 'Paid',
+      dueDate: '2026-08-15',
+      paidDate: `2026-08-0${(idx % 5) + 3}`,
+      paymentMode: idx % 2 === 0 ? 'UPI' : 'NEFT / RTGS',
+      utrNumber: `NEFT/20260805/ICICI/${7641000 + idx}`,
+      receiptNumber: `SOL-REC-2608-${flatNo.replace('-', '')}`,
+      receiptUrl: `/receipts/2026-08-${flatNo}.pdf`,
+      breakdown: {
+        maintenance: Math.round(amountDue * 0.65),
+        sinkingFund: Math.round(amountDue * 0.15),
+        waterCharges: Math.round(amountDue * 0.12),
+        gstAmount: Math.round(amountDue * 0.08),
+      },
+    });
+  });
+
+  return ledger;
+})();
+
 
 

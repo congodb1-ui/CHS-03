@@ -32,10 +32,18 @@ export const LoginModal: React.FC = () => {
     setActiveTab,
     isSupabaseOnline,
     profiles,
+    resetPasswordForEmail,
   } = useSociety();
 
   // Active form tab
   const [activeTab, setActiveTabMode] = useState<'login' | 'register'>('login');
+
+  // Forgot Password state
+  const [showForgotPassword, setShowForgotPassword] = useState(false);
+  const [forgotEmail, setForgotEmail] = useState('');
+  const [forgotLoading, setForgotLoading] = useState(false);
+  const [forgotSuccess, setForgotSuccess] = useState('');
+  const [forgotError, setForgotError] = useState('');
 
   // Sign In Form State - Clean manual input, no demo autofills
   const [loginIdentifier, setLoginIdentifier] = useState('');
@@ -89,11 +97,20 @@ export const LoginModal: React.FC = () => {
     return f.startsWith('C-');
   });
 
-  // Check if flat is already occupied in society registry
-  const isFlatOccupied = (flatNo: string) => {
+  // Check if flat is already registered for this specific ownership type (Dual-User: 1 Owner + 1 Tenant)
+  const isFlatOccupiedForType = (flatNo: string, type: 'Owner' | 'Tenant') => {
     return profiles.some(
-      (p) => p.flatNo.toUpperCase() === flatNo.toUpperCase() && p.status !== 'Rejected'
+      (p) => p.flatNo.toUpperCase() === flatNo.toUpperCase() && p.ownershipType === type && p.status !== 'Rejected'
     );
+  };
+
+  const getFlatOccupancyLabel = (flatNo: string) => {
+    const hasOwner = isFlatOccupiedForType(flatNo, 'Owner');
+    const hasTenant = isFlatOccupiedForType(flatNo, 'Tenant');
+    if (hasOwner && hasTenant) return '(Fully Registered: Owner + Tenant)';
+    if (hasOwner) return '(Owner Registered · Tenant Slot Open)';
+    if (hasTenant) return '(Tenant Registered · Owner Slot Open)';
+    return '(Available)';
   };
 
   const handleLoginSubmit = async (e?: React.FormEvent) => {
@@ -278,85 +295,174 @@ export const LoginModal: React.FC = () => {
                 </div>
               )}
 
-              <form onSubmit={handleLoginSubmit} className="space-y-4">
-                {/* Identifier Input */}
-                <div className="space-y-1.5">
-                  <label className="font-semibold text-slate-800 block text-xs">
-                    Registered Email Address / Flat Number / Member ID
-                  </label>
-                  <div className="relative">
-                    <Mail className="w-4 h-4 text-slate-400 absolute left-3 top-2.5" />
-                    <input
-                      type="text"
-                      required
-                      placeholder="e.g. resident@example.com or A-402"
-                      value={loginIdentifier}
-                      onChange={(e) => setLoginIdentifier(e.target.value)}
-                      className="w-full pl-9 pr-3 py-2 bg-slate-50 border border-slate-300 rounded-lg text-slate-900 focus:bg-white focus:outline-teal-700 focus:border-teal-700 text-xs font-medium transition-colors shadow-2xs"
-                    />
-                  </div>
-                </div>
-
-                {/* Password Input */}
-                <div className="space-y-1.5">
-                  <div className="flex items-center justify-between">
-                    <label className="font-semibold text-slate-800 block text-xs">Account Password</label>
-                  </div>
-                  <div className="relative">
-                    <Lock className="w-4 h-4 text-slate-400 absolute left-3 top-2.5" />
-                    <input
-                      type={showLoginPassword ? 'text' : 'password'}
-                      required
-                      placeholder="Enter account password"
-                      value={loginPassword}
-                      onChange={(e) => setLoginPassword(e.target.value)}
-                      className="w-full pl-9 pr-10 py-2 bg-slate-50 border border-slate-300 rounded-lg text-slate-900 focus:bg-white focus:outline-teal-700 focus:border-teal-700 text-xs font-medium transition-colors shadow-2xs"
-                    />
+              {showForgotPassword ? (
+                <div className="space-y-4 p-4 bg-slate-50 rounded-xl border border-slate-200 animate-in fade-in duration-150">
+                  <div className="flex items-center justify-between pb-2 border-b border-slate-200">
+                    <div className="flex items-center gap-2">
+                      <KeyRound className="w-4 h-4 text-teal-700" />
+                      <span className="font-bold text-slate-900 text-xs">Self-Service Password Recovery</span>
+                    </div>
                     <button
                       type="button"
-                      onClick={() => setShowLoginPassword(!showLoginPassword)}
-                      className="absolute right-3 top-2.5 text-slate-400 hover:text-slate-600 cursor-pointer"
-                      aria-label="Toggle password visibility"
+                      onClick={() => setShowForgotPassword(false)}
+                      className="text-slate-400 hover:text-slate-600 text-xs font-semibold cursor-pointer"
                     >
-                      {showLoginPassword ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
+                      Back to Sign In
+                    </button>
+                  </div>
+
+                  <p className="text-[11px] text-slate-600">
+                    Enter your registered personal email address. We will verify your account and trigger an official password recovery link via Supabase Auth.
+                  </p>
+
+                  {forgotError && (
+                    <div className="p-2.5 bg-red-50 text-red-700 rounded-lg border border-red-200 text-xs font-medium flex items-center gap-1.5">
+                      <AlertTriangle className="w-3.5 h-3.5 shrink-0 text-red-600" />
+                      <span>{forgotError}</span>
+                    </div>
+                  )}
+
+                  {forgotSuccess && (
+                    <div className="p-2.5 bg-emerald-50 text-emerald-800 rounded-lg border border-emerald-200 text-xs font-semibold flex items-center gap-1.5">
+                      <CheckCircle2 className="w-3.5 h-3.5 shrink-0 text-emerald-600" />
+                      <span>{forgotSuccess}</span>
+                    </div>
+                  )}
+
+                  <div className="space-y-1">
+                    <label className="font-semibold text-slate-800 block text-xs">Registered Personal Email</label>
+                    <input
+                      type="email"
+                      required
+                      placeholder="resident@gmail.com"
+                      value={forgotEmail}
+                      onChange={(e) => setForgotEmail(e.target.value)}
+                      className="w-full px-3 py-2 bg-white border border-slate-300 rounded-lg text-xs font-medium focus:outline-teal-700"
+                    />
+                  </div>
+
+                  <div className="flex items-center justify-end gap-2 pt-1">
+                    <button
+                      type="button"
+                      onClick={() => setShowForgotPassword(false)}
+                      className="px-3 py-1.5 text-xs text-slate-600 hover:text-slate-800 font-semibold cursor-pointer"
+                    >
+                      Cancel
+                    </button>
+                    <button
+                      type="button"
+                      disabled={forgotLoading || !forgotEmail.trim()}
+                      onClick={async () => {
+                        setForgotLoading(true);
+                        setForgotError('');
+                        setForgotSuccess('');
+                        const res = await resetPasswordForEmail(forgotEmail.trim());
+                        setForgotLoading(false);
+                        if (res.success) {
+                          setForgotSuccess(res.message);
+                        } else {
+                          setForgotError(res.message || 'Failed to trigger reset email.');
+                        }
+                      }}
+                      className="px-4 py-2 bg-teal-700 hover:bg-teal-800 text-white rounded-lg text-xs font-bold transition-colors cursor-pointer shadow-xs disabled:bg-teal-400"
+                    >
+                      {forgotLoading ? 'Sending Link...' : 'Send Recovery Email'}
                     </button>
                   </div>
                 </div>
+              ) : (
+                <form onSubmit={handleLoginSubmit} className="space-y-4">
+                  {/* Identifier Input */}
+                  <div className="space-y-1.5">
+                    <label className="font-semibold text-slate-800 block text-xs">
+                      Registered Email Address / Flat Number / Member ID
+                    </label>
+                    <div className="relative">
+                      <Mail className="w-4 h-4 text-slate-400 absolute left-3 top-2.5" />
+                      <input
+                        type="text"
+                        required
+                        placeholder="e.g. resident@example.com or A-402"
+                        value={loginIdentifier}
+                        onChange={(e) => setLoginIdentifier(e.target.value)}
+                        className="w-full pl-9 pr-3 py-2 bg-slate-50 border border-slate-300 rounded-lg text-slate-900 focus:bg-white focus:outline-teal-700 focus:border-teal-700 text-xs font-medium transition-colors shadow-2xs"
+                      />
+                    </div>
+                  </div>
 
-                {/* Remember session */}
-                <div className="flex items-center justify-between pt-0.5">
-                  <label className="flex items-center gap-2 cursor-pointer select-none text-slate-600 font-medium">
-                    <input
-                      type="checkbox"
-                      checked={rememberMe}
-                      onChange={(e) => setRememberMe(e.target.checked)}
-                      className="rounded border-slate-300 text-teal-700 focus:ring-teal-700 w-3.5 h-3.5"
-                    />
-                    <span>Remember session on this device</span>
-                  </label>
-                </div>
+                  {/* Password Input */}
+                  <div className="space-y-1.5">
+                    <div className="flex items-center justify-between">
+                      <label className="font-semibold text-slate-800 block text-xs">Account Password</label>
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setShowForgotPassword(true);
+                          setForgotEmail(loginIdentifier.includes('@') ? loginIdentifier : '');
+                          setForgotError('');
+                          setForgotSuccess('');
+                        }}
+                        className="text-[11px] font-semibold text-teal-700 hover:text-teal-800 hover:underline cursor-pointer"
+                      >
+                        Forgot Password?
+                      </button>
+                    </div>
+                    <div className="relative">
+                      <Lock className="w-4 h-4 text-slate-400 absolute left-3 top-2.5" />
+                      <input
+                        type={showLoginPassword ? 'text' : 'password'}
+                        required
+                        placeholder="Enter account password"
+                        value={loginPassword}
+                        onChange={(e) => setLoginPassword(e.target.value)}
+                        className="w-full pl-9 pr-10 py-2 bg-slate-50 border border-slate-300 rounded-lg text-slate-900 focus:bg-white focus:outline-teal-700 focus:border-teal-700 text-xs font-medium transition-colors shadow-2xs"
+                      />
+                      <button
+                        type="button"
+                        onClick={() => setShowLoginPassword(!showLoginPassword)}
+                        className="absolute right-3 top-2.5 text-slate-400 hover:text-slate-600 cursor-pointer"
+                        aria-label="Toggle password visibility"
+                      >
+                        {showLoginPassword ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
+                      </button>
+                    </div>
+                  </div>
 
-                {/* Sign In Button */}
-                <div className="pt-2">
-                  <button
-                    type="submit"
-                    disabled={loginLoading}
-                    className="w-full py-2.5 bg-teal-700 hover:bg-teal-800 disabled:bg-teal-400 text-white rounded-xl font-bold flex items-center justify-center gap-2 cursor-pointer shadow-sm transition-all text-xs"
-                  >
-                    {loginLoading ? (
-                      <>
-                        <Loader2 className="w-4 h-4 animate-spin" />
-                        <span>Verifying Credentials...</span>
-                      </>
-                    ) : (
-                      <>
-                        <span>Sign In to Portal</span>
-                        <ArrowRight className="w-4 h-4" />
-                      </>
-                    )}
-                  </button>
-                </div>
-              </form>
+                  {/* Remember session */}
+                  <div className="flex items-center justify-between pt-0.5">
+                    <label className="flex items-center gap-2 cursor-pointer select-none text-slate-600 font-medium">
+                      <input
+                        type="checkbox"
+                        checked={rememberMe}
+                        onChange={(e) => setRememberMe(e.target.checked)}
+                        className="rounded border-slate-300 text-teal-700 focus:ring-teal-700 w-3.5 h-3.5"
+                      />
+                      <span>Remember session on this device</span>
+                    </label>
+                  </div>
+
+                  {/* Sign In Button */}
+                  <div className="pt-2">
+                    <button
+                      type="submit"
+                      disabled={loginLoading}
+                      className="w-full py-2.5 bg-teal-700 hover:bg-teal-800 disabled:bg-teal-400 text-white rounded-xl font-bold flex items-center justify-center gap-2 cursor-pointer shadow-sm transition-all text-xs"
+                    >
+                      {loginLoading ? (
+                        <>
+                          <Loader2 className="w-4 h-4 animate-spin" />
+                          <span>Verifying Credentials...</span>
+                        </>
+                      ) : (
+                        <>
+                          <span>Sign In to Portal</span>
+                          <ArrowRight className="w-4 h-4" />
+                        </>
+                      )}
+                    </button>
+                  </div>
+                </form>
+              )}
 
               {/* Security Disclaimer Box - Clean padding below Sign In action */}
               <div className="mt-4 p-3 bg-slate-50 rounded-xl border border-slate-200/80 text-slate-500 text-[11px] leading-relaxed flex items-start gap-2">
@@ -438,10 +544,11 @@ export const LoginModal: React.FC = () => {
                     className="w-full px-3 py-2 bg-slate-50 border border-slate-300 rounded-lg font-mono font-bold text-slate-900 focus:border-teal-600 focus:outline-none text-xs"
                   >
                     {availableFlatsForTower.map((flat) => {
-                      const occupied = isFlatOccupied(flat);
+                      const occupiedForThisRole = isFlatOccupiedForType(flat, regOwnership);
+                      const statusLabel = getFlatOccupancyLabel(flat);
                       return (
-                        <option key={flat} value={flat} disabled={occupied}>
-                          {flat} {occupied ? '(Registered)' : '(Available)'}
+                        <option key={flat} value={flat} disabled={occupiedForThisRole}>
+                          {flat} {statusLabel}
                         </option>
                       );
                     })}

@@ -37,19 +37,49 @@ export const ProfileEditModal: React.FC<ProfileEditModalProps> = ({ isOpen, onCl
 
   if (!isOpen || !currentProfile) return null;
 
+  const [isDragging, setIsDragging] = useState(false);
+
+  const processFile = (file: File) => {
+    const validTypes = ['image/jpeg', 'image/png', 'image/webp', 'image/svg+xml', 'image/jpg'];
+    if (!validTypes.includes(file.type) && !file.name.match(/\.(jpg|jpeg|png|webp|svg)$/i)) {
+      setErrorMsg('Please upload a valid image file (.jpg, .jpeg, .png, .webp, or .svg).');
+      return;
+    }
+    if (file.size > 5 * 1024 * 1024) {
+      setErrorMsg('File size exceeds 5MB limit. Please choose a smaller image.');
+      return;
+    }
+    const reader = new FileReader();
+    reader.onloadend = () => {
+      setAvatarUrl(reader.result as string);
+      setErrorMsg(null);
+    };
+    reader.readAsDataURL(file);
+  };
+
   const handleFileUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (file) {
-      if (file.size > 2 * 1024 * 1024) {
-        setErrorMsg('Please select an image file under 2MB.');
-        return;
-      }
-      const reader = new FileReader();
-      reader.onloadend = () => {
-        setAvatarUrl(reader.result as string);
-        setErrorMsg(null);
-      };
-      reader.readAsDataURL(file);
+      processFile(file);
+    }
+  };
+
+  const handleDragOver = (e: React.DragEvent) => {
+    e.preventDefault();
+    setIsDragging(true);
+  };
+
+  const handleDragLeave = (e: React.DragEvent) => {
+    e.preventDefault();
+    setIsDragging(false);
+  };
+
+  const handleDrop = (e: React.DragEvent) => {
+    e.preventDefault();
+    setIsDragging(false);
+    const file = e.dataTransfer.files?.[0];
+    if (file) {
+      processFile(file);
     }
   };
 
@@ -121,10 +151,23 @@ export const ProfileEditModal: React.FC<ProfileEditModalProps> = ({ isOpen, onCl
         {/* Form */}
         <form onSubmit={handleSave} className="space-y-4 text-xs">
           {/* MODULE 6: Profile Photo (Optional) */}
-          <div className="p-3.5 bg-slate-50 rounded-xl border border-slate-200 space-y-3">
-            <label className="font-bold text-slate-800 block text-xs">
-              Profile Photo (Optional)
-            </label>
+          <div
+            onDragOver={handleDragOver}
+            onDragLeave={handleDragLeave}
+            onDrop={handleDrop}
+            className={`p-3.5 rounded-xl border transition-all space-y-3 ${
+              isDragging
+                ? 'bg-teal-50/80 border-teal-500 border-dashed ring-2 ring-teal-200'
+                : 'bg-slate-50 border-slate-200'
+            }`}
+          >
+            <div className="flex items-center justify-between">
+              <label className="font-bold text-slate-800 block text-xs">
+                Profile Photo (Optional)
+              </label>
+              <span className="text-[10px] text-slate-400 font-medium">Max 5MB (JPG, PNG, WebP, SVG)</span>
+            </div>
+
             <div className="flex items-center gap-3">
               {avatarUrl ? (
                 <div className="relative w-14 h-14 rounded-full overflow-hidden border-2 border-teal-600 shrink-0 shadow-xs">
@@ -136,7 +179,7 @@ export const ProfileEditModal: React.FC<ProfileEditModalProps> = ({ isOpen, onCl
                   <button
                     type="button"
                     onClick={() => setAvatarUrl('')}
-                    className="absolute inset-0 bg-black/40 text-white flex items-center justify-center opacity-0 hover:opacity-100 transition-opacity cursor-pointer"
+                    className="absolute inset-0 bg-black/50 text-white flex items-center justify-center opacity-0 hover:opacity-100 transition-opacity cursor-pointer"
                     title="Remove photo"
                   >
                     <X className="w-4 h-4" />
@@ -162,7 +205,7 @@ export const ProfileEditModal: React.FC<ProfileEditModalProps> = ({ isOpen, onCl
                     <span>Upload Local File</span>
                     <input
                       type="file"
-                      accept="image/*"
+                      accept="image/jpeg,image/png,image/webp,image/svg+xml"
                       onChange={handleFileUpload}
                       className="hidden"
                     />
@@ -180,7 +223,7 @@ export const ProfileEditModal: React.FC<ProfileEditModalProps> = ({ isOpen, onCl
               </div>
             </div>
             <p className="text-[10px] text-slate-400">
-              Optional avatar shown in member directories, ticket comments, and header profile badges.
+              Drag & drop an image here or choose a file. Shown in member directories, ticket comments, and header badges.
             </p>
           </div>
 

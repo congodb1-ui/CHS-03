@@ -34,9 +34,12 @@ export const ResidentRegistryView: React.FC = () => {
     profiles,
     approveMemberProfile,
     updateUserRole,
+    updateUserRoles,
     deleteMemberProfile,
     addMemberProfile,
     updateMemberProfile,
+    adminResetPassword,
+    resetPasswordForEmail,
     auditLogs,
     role,
     userFlat,
@@ -46,6 +49,12 @@ export const ResidentRegistryView: React.FC = () => {
 
   const [activeSubTab, setActiveSubTab] = useState<'directory' | 'approvals' | 'roles' | 'audit'>('directory');
   const [approvalSubTab, setApprovalSubTab] = useState<'pending' | 'rejected'>('pending');
+
+  // Admin Password Reset Modal State
+  const [resetModalMember, setResetModalMember] = useState<MemberProfile | null>(null);
+  const [tempPasswordInput, setTempPasswordInput] = useState<string>('Solitaire@2026');
+  const [resetModalMsg, setResetModalMsg] = useState<{ type: 'success' | 'error'; text: string } | null>(null);
+  const [resetLoading, setResetLoading] = useState<boolean>(false);
 
   // Admin Edit Member Modal State
   const [editingProfile, setEditingProfile] = useState<MemberProfile | null>(null);
@@ -418,6 +427,18 @@ export const ResidentRegistryView: React.FC = () => {
                             <div className="flex items-center justify-end gap-1.5">
                               <button
                                 onClick={() => {
+                                  setResetModalMember(p);
+                                  setTempPasswordInput('Solitaire@2026');
+                                  setResetModalMsg(null);
+                                }}
+                                className="inline-flex items-center gap-1 px-2.5 py-1 text-xs font-semibold text-amber-800 bg-amber-50 hover:bg-amber-100 border border-amber-200 rounded-lg transition-colors cursor-pointer"
+                                title="Reset Password / Set Temp Password for Member"
+                              >
+                                <KeyRound className="w-3.5 h-3.5 text-amber-600" />
+                                <span>Reset Pwd</span>
+                              </button>
+                              <button
+                                onClick={() => {
                                   setEditingProfile(p);
                                   setEditForm({ ...p });
                                   setEditSuccessMsg(null);
@@ -588,43 +609,92 @@ export const ResidentRegistryView: React.FC = () => {
         </div>
       )}
 
-      {/* SUB-TAB 3: ROLE & PERMISSION ENGINE */}
+      {/* SUB-TAB 3: MULTI-ROLE ASSIGNMENT PANEL */}
       {activeSubTab === 'roles' && isAdminOrSecretary && (
         <div className="bg-white border border-slate-200 rounded-xl p-6 shadow-xs space-y-4">
-          <div>
-            <h3 className="text-sm font-bold text-slate-900">Society Role Assignment</h3>
-            <p className="text-xs text-slate-500">
-              Assign or update privileges. Verified residents hold resident permissions; Managing Committee and Admins have supervisory access.
-            </p>
+          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 pb-3 border-b border-slate-100">
+            <div>
+              <h3 className="text-sm font-bold text-slate-900">Admin Multi-Role Assignment Panel</h3>
+              <p className="text-xs text-slate-500">
+                Grant or revoke simultaneous privileges. Users can simultaneously hold multiple roles (e.g., Resident + MC Member + Secretary).
+              </p>
+            </div>
+            <span className="text-[11px] font-mono text-teal-700 bg-teal-50 border border-teal-200 px-2.5 py-1 rounded-lg font-semibold">
+              Array-Based Multi-Role Engine Active
+            </span>
           </div>
 
           <div className="divide-y divide-slate-100 text-xs">
             {profiles
               .filter((p) => p.isApproved)
-              .map((p) => (
-                <div key={p.id} className="py-3 flex flex-col sm:flex-row sm:items-center justify-between gap-3">
-                  <div>
-                    <div className="flex items-center gap-2">
-                      <span className="font-bold text-slate-900">{p.name}</span>
-                      <span className="font-mono text-slate-500">[{p.flatNo}]</span>
-                    </div>
-                    <span className="text-[11px] text-slate-400">{p.email}</span>
-                  </div>
+              .map((p) => {
+                const currentRoles = p.roles && p.roles.length > 0 ? p.roles : [p.role];
+                const availableRoles: Array<{ key: string; label: string; color: string }> = [
+                  { key: 'resident', label: 'Resident (Owner)', color: 'border-slate-300 text-slate-800' },
+                  { key: 'tenant', label: 'Tenant', color: 'border-purple-300 text-purple-800' },
+                  { key: 'mc_member', label: 'MC Member', color: 'border-teal-300 text-teal-800' },
+                  { key: 'secretary', label: 'Secretary', color: 'border-amber-300 text-amber-800' },
+                  { key: 'admin', label: 'Society Admin', color: 'border-rose-300 text-rose-800' },
+                  { key: 'supervisor', label: 'Supervisor', color: 'border-blue-300 text-blue-800' },
+                ];
 
-                  <div className="flex items-center gap-2">
-                    <select
-                      value={p.role}
-                      onChange={(e) => updateUserRole(p.id, e.target.value as UserRole)}
-                      className="px-3 py-1.5 bg-slate-50 border border-slate-300 rounded-lg text-xs font-semibold text-slate-900"
-                    >
-                      <option value="resident">Resident</option>
-                      <option value="supervisor">Facility Supervisor</option>
-                      <option value="mc_member">Managing Committee</option>
-                      <option value="admin">Society Admin</option>
-                    </select>
+                return (
+                  <div key={p.id} className="py-4 flex flex-col lg:flex-row lg:items-center justify-between gap-3">
+                    <div className="min-w-[220px]">
+                      <div className="flex items-center gap-2">
+                        <span className="font-bold text-slate-900 text-sm">{p.name}</span>
+                        <span className="font-mono text-slate-500 font-bold bg-slate-100 px-1.5 py-0.5 rounded text-[11px]">
+                          [{p.flatNo}]
+                        </span>
+                      </div>
+                      <span className="text-[11px] text-slate-400 block truncate">{p.email}</span>
+                      <div className="flex flex-wrap gap-1 mt-1.5">
+                        {currentRoles.map((r) => (
+                          <span
+                            key={r}
+                            className="px-2 py-0.5 rounded text-[10px] font-bold bg-slate-100 text-slate-700 border border-slate-200"
+                          >
+                            {ROLE_LABELS[r] || r}
+                          </span>
+                        ))}
+                      </div>
+                    </div>
+
+                    <div className="flex flex-wrap items-center gap-2">
+                      {availableRoles.map((r) => {
+                        const isAssigned = currentRoles.includes(r.key);
+                        return (
+                          <button
+                            key={r.key}
+                            type="button"
+                            onClick={() => {
+                              let nextRoles: string[];
+                              if (isAssigned) {
+                                if (currentRoles.length === 1) {
+                                  alert('A member must have at least one assigned role.');
+                                  return;
+                                }
+                                nextRoles = currentRoles.filter((item) => item !== r.key);
+                              } else {
+                                nextRoles = [...currentRoles, r.key];
+                              }
+                              updateUserRoles(p.id, nextRoles);
+                            }}
+                            className={`px-2.5 py-1 rounded-lg text-[11px] font-semibold transition-all cursor-pointer border flex items-center gap-1 ${
+                              isAssigned
+                                ? 'bg-slate-900 text-white border-slate-900 shadow-2xs'
+                                : 'bg-slate-50 hover:bg-slate-100 border-slate-200 text-slate-600'
+                            }`}
+                          >
+                            <span className={`w-1.5 h-1.5 rounded-full ${isAssigned ? 'bg-teal-400' : 'bg-slate-300'}`} />
+                            <span>{r.label}</span>
+                          </button>
+                        );
+                      })}
+                    </div>
                   </div>
-                </div>
-              ))}
+                );
+              })}
           </div>
         </div>
       )}

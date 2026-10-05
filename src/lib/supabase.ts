@@ -47,6 +47,10 @@ export const supabase = createClient(supabaseUrl, supabaseAnonKey, {
 // Mapping helpers between Supabase snake_case tables and Solitaire Frontend camelCase models
 
 export function mapMemberRowToProfile(row: Partial<SupabaseMemberRow>): MemberProfile {
+  const profileRoles = Array.isArray((row as any).roles)
+    ? (row as any).roles
+    : (row.role ? [row.role] : ['resident']);
+
   return {
     id: row.id || `usr-${Date.now()}`,
     memberId: row.member_id || (row as any).memberId || `SOL-${row.flat_no || 'GEN'}`,
@@ -56,6 +60,7 @@ export function mapMemberRowToProfile(row: Partial<SupabaseMemberRow>): MemberPr
     tower: (row.tower as any) || 'Tower A',
     flatNo: row.flat_no || (row as any).flatNo || 'A-101',
     role: (row.role as any) || 'resident',
+    roles: profileRoles,
     ownershipType: (row.ownership_type as any) || (row as any).ownershipType || 'Owner',
     phone: row.phone || '',
     isApproved: row.is_approved ?? (row as any).isApproved ?? false,
@@ -77,6 +82,7 @@ export function mapProfileToMemberRow(profile: MemberProfile): SupabaseMemberRow
     tower: profile.tower,
     flat_no: profile.flatNo,
     role: profile.role,
+    roles: profile.roles || [profile.role],
     ownership_type: profile.ownershipType,
     phone: profile.phone,
     is_approved: profile.isApproved,

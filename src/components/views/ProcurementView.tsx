@@ -60,9 +60,13 @@ export const ProcurementView: React.FC = () => {
     addWorkOrderPayment,
     userName,
     currentMemberId,
+    currentProfile,
+    currentUserRoles,
+    hasRole,
   } = useSociety();
 
-  const isAdminOrMC = role === 'admin' || role === 'mc_member' || role === 'secretary';
+  const isAdminOrMC = role === 'admin' || role === 'mc_member' || role === 'secretary' || hasRole('admin') || hasRole('mc_member') || hasRole('secretary');
+  const isSecretary = role === 'secretary' || (currentUserRoles && currentUserRoles.includes('secretary')) || hasRole('secretary');
 
   // Access Gate Enforcement: Redirect standard residents away from Procurement
   useEffect(() => {
@@ -310,8 +314,8 @@ export const ProcurementView: React.FC = () => {
   // Secretary Approval Action (Restricted strictly to MC Secretary role)
   const handleSecretaryApprove = () => {
     if (!showSecretaryApprovalModal) return;
-    if (role !== 'secretary') {
-      setApprovalError('Unauthorized: Only the MC Secretary has authority to approve Work Orders.');
+    if (!isSecretary) {
+      setApprovalError('Unauthorized: Only the MC Secretary has legal authority under MCS Act 1960 to approve Work Orders. Society Admins cannot bypass.');
       return;
     }
     if (!secretaryComments.trim()) {
@@ -326,7 +330,7 @@ export const ProcurementView: React.FC = () => {
 
   const handleSecretaryRequestChanges = () => {
     if (!showSecretaryApprovalModal) return;
-    if (role !== 'secretary') {
+    if (!isSecretary) {
       setApprovalError('Unauthorized: Only the MC Secretary has authority to request revisions.');
       return;
     }
@@ -861,21 +865,22 @@ export const ProcurementView: React.FC = () => {
                       )}
 
                       {isAuthorized && wo.approvalStatus !== 'Approved' && (
-                        role === 'secretary' ? (
+                        isSecretary ? (
                           <button
                             onClick={() => setShowSecretaryApprovalModal(wo)}
-                            className="px-3 py-1.5 bg-amber-500 hover:bg-amber-600 text-white rounded-lg text-xs font-semibold cursor-pointer shadow-2xs"
+                            className="px-3 py-1.5 bg-amber-500 hover:bg-amber-600 text-white rounded-lg text-xs font-semibold cursor-pointer shadow-2xs flex items-center gap-1.5"
                           >
-                            Secretary Approval Action
+                            <ShieldCheck className="w-3.5 h-3.5" />
+                            <span>Secretary Approval & Signature</span>
                           </button>
                         ) : (
                           <button
                             disabled
                             className="px-3 py-1.5 bg-slate-200 text-slate-400 rounded-lg text-xs font-semibold cursor-not-allowed shadow-none border border-slate-300 flex items-center gap-1.5"
-                            title="Secretary Approval Action is restricted strictly to the MC Secretary role (Disabled for Admin & other roles)"
+                            title="Secretary Approval & Signature is restricted strictly to the Secretary role (Admins cannot bypass this restriction)"
                           >
                             <Lock className="w-3.5 h-3.5 text-slate-400" />
-                            <span>Secretary Approval Action</span>
+                            <span>Secretary Approval & Signature</span>
                           </button>
                         )
                       )}

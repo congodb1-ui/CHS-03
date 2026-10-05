@@ -1,31 +1,100 @@
 export type UserRole =
   | 'public'
   | 'resident'
+  | 'tenant'
   | 'supervisor'
   | 'mc_member'
   | 'admin'
-  // Legacy aliases for full backward compatibility
-  | 'member'
-  | 'secretary';
+  | 'secretary'
+  // Legacy alias for full backward compatibility
+  | 'member';
 
 export const ROLE_LABELS: Record<string, string> = {
   public: 'Public (Unauthenticated)',
-  resident: 'Resident',
-  supervisor: 'Supervisor',
+  resident: 'Resident (Owner)',
+  tenant: 'Tenant',
+  supervisor: 'Facility Supervisor',
   mc_member: 'MC Member',
-  admin: 'Admin',
+  secretary: 'MC Secretary',
+  admin: 'Society Admin',
   member: 'Resident',
-  secretary: 'MC Member',
 };
 
 export type TowerId = 'Tower A' | 'Tower B' | 'Tower C';
 
-// 180 Predefined flats across Towers A, B, and C (15 floors, 4 flats per floor: 101 to 1504)
-export const ALL_SOCIETY_FLATS: string[] = [
-  ...Array.from({ length: 15 }, (_, f) => [1, 2, 3, 4].map((u) => `A-${(f + 1) * 100 + u}`)).flat(),
-  ...Array.from({ length: 15 }, (_, f) => [1, 2, 3, 4].map((u) => `B-${(f + 1) * 100 + u}`)).flat(),
-  ...Array.from({ length: 15 }, (_, f) => [1, 2, 3, 4].map((u) => `C-${(f + 1) * 100 + u}`)).flat(),
+// Tower Specifications:
+// Tower A: 6 Floors (Total ~67 Units: 5 floors x 11 units + 1 floor x 12 units)
+// Tower B: 6 Floors (Total ~67 Units: 5 floors x 11 units + 1 floor x 12 units)
+// Tower C: 6 Floors (Total ~66 Units: 6 floors x 11 units)
+// Total Society Units: 200
+export const TOWER_UNIT_COUNTS: Record<TowerId, number> = {
+  'Tower A': 67,
+  'Tower B': 67,
+  'Tower C': 66,
+};
+export const TOTAL_SOCIETY_UNITS = 200;
+
+export const TOWER_A_FLATS: string[] = [
+  ...Array.from({ length: 5 }, (_, f) => Array.from({ length: 11 }, (_, u) => `A-${(f + 1) * 100 + (u + 1)}`)).flat(),
+  ...Array.from({ length: 12 }, (_, u) => `A-6${String(u + 1).padStart(2, '0')}`),
 ];
+
+export const TOWER_B_FLATS: string[] = [
+  ...Array.from({ length: 5 }, (_, f) => Array.from({ length: 11 }, (_, u) => `B-${(f + 1) * 100 + (u + 1)}`)).flat(),
+  ...Array.from({ length: 12 }, (_, u) => `B-6${String(u + 1).padStart(2, '0')}`),
+];
+
+export const TOWER_C_FLATS: string[] = [
+  ...Array.from({ length: 6 }, (_, f) => Array.from({ length: 11 }, (_, u) => `C-${(f + 1) * 100 + (u + 1)}`)).flat(),
+];
+
+// Predefined 200 society flats across Towers A, B, and C
+export const ALL_SOCIETY_FLATS: string[] = [
+  ...TOWER_A_FLATS,
+  ...TOWER_B_FLATS,
+  ...TOWER_C_FLATS,
+];
+
+// Helper to evaluate user roles array
+export function getUserRoles(profile?: Partial<MemberProfile> | null, activeRole?: UserRole): string[] {
+  const rolesSet = new Set<string>();
+  if (activeRole && activeRole !== 'public') rolesSet.add(activeRole);
+  if (profile?.role && profile.role !== 'public') rolesSet.add(profile.role);
+  if (Array.isArray(profile?.roles)) {
+    profile.roles.forEach((r) => {
+      if (r) rolesSet.add(r);
+    });
+  }
+  // Standardize aliases
+  if (rolesSet.has('member')) rolesSet.add('resident');
+  if (rolesSet.size === 0) rolesSet.add('public');
+  return Array.from(rolesSet);
+}
+
+export function hasRole(
+  profileOrRoles: Partial<MemberProfile> | string[] | null | undefined,
+  targetRole: string,
+  activeRole?: UserRole
+): boolean {
+  if (targetRole === 'public') return true;
+  if (Array.isArray(profileOrRoles)) {
+    if (profileOrRoles.includes(targetRole)) return true;
+    if (targetRole === 'resident' && profileOrRoles.includes('member')) return true;
+    return activeRole ? activeRole === targetRole : false;
+  }
+  const roles = getUserRoles(profileOrRoles, activeRole);
+  if (roles.includes(targetRole)) return true;
+  if (targetRole === 'resident' && roles.includes('member')) return true;
+  return false;
+}
+
+export function hasAnyRole(
+  profileOrRoles: Partial<MemberProfile> | string[] | null | undefined,
+  targetRoles: string[],
+  activeRole?: UserRole
+): boolean {
+  return targetRoles.some((tr) => hasRole(profileOrRoles, tr, activeRole));
+}
 
 // Supabase Units / Flats Schema Representation
 export interface SocietyUnit {
@@ -102,6 +171,7 @@ export interface SupabaseMemberRow {
   tower: TowerId | string;
   flat_no: string;
   role: UserRole | string;
+  roles?: string[];
   ownership_type: 'Owner' | 'Tenant' | string;
   phone: string;
   is_approved: boolean;
@@ -208,10 +278,10 @@ export interface ChatMessage {
 export interface StaffMember {
   srNo: number;
   name: string;
-  team: 'Supervisor' | 'Office Admin' | 'Security' | 'Housekeeping' | 'Electrician' | 'Plumber';
+  team: 'Supervisor' | 'Office Admin' | 'Security' | 'Housekeeping' | 'Electrician' | 'Plumber' | string;
   role: string;
   shift: string;
-  status: 'Active' | 'Inactive';
+  status: 'Active' | 'Inactive' | 'On Leave' | 'Reliever';
 }
 
 export type AttendanceCode = 'P' | 'A' | 'L' | 'HD' | 'WO' | '';
@@ -412,9 +482,10 @@ export interface MemberProfile {
   avatarUrl?: string;
   avatar_url?: string;
   tower: TowerId;
-  flatNo: string; // Strictly unique per flat constraint!
+  flatNo: string;
   flat_no?: string;
   role: UserRole;
+  roles?: string[]; // Multi-role support, e.g. ['resident', 'mc_member', 'secretary']
   ownershipType: 'Owner' | 'Tenant';
   ownership_type?: 'Owner' | 'Tenant' | string;
   phone: string;
@@ -433,6 +504,37 @@ export interface MemberProfile {
   twoWheelerSlot?: string;
   emergencyContactName?: string;
   emergencyContactPhone?: string;
+  temporaryPassword?: string;
+}
+
+// Maintenance & Dues Schema
+export interface MaintenanceLedgerEntry {
+  id: string;
+  month: string; // e.g. "October 2026"
+  billingCycle: string; // "2026-10"
+  flatNo: string;
+  tower: TowerId;
+  floor: number;
+  residentName: string;
+  ownershipType: 'Owner' | 'Tenant';
+  amountDue: number; // e.g. 4250
+  amountPaid: number;
+  status: 'Paid' | 'Unpaid' | 'Overdue';
+  paymentStatus?: 'Paid' | 'Unpaid' | 'Overdue';
+  dueDate: string;
+  paidDate?: string;
+  paymentMode?: 'UPI' | 'NEFT / RTGS' | 'Cheque' | 'Cash';
+  utrNumber?: string;
+  receiptNumber?: string;
+  receiptUrl?: string;
+  lateFee?: number;
+  breakdown?: {
+    maintenance: number;
+    sinkingFund: number;
+    waterCharges: number;
+    gstAmount: number;
+  };
+  notes?: string;
 }
 
 export interface ApprovalAuditEntry {
